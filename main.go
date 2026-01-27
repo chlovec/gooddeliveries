@@ -35,14 +35,14 @@ var (
 )
 
 func parseLogsToActions(buf *bytes.Buffer) ([]css.Action, error) {
-    var actions []css.Action
-    scanner := bufio.NewScanner(buf)
+	var actions []css.Action
+	scanner := bufio.NewScanner(buf)
 
-    for scanner.Scan() {
-        var raw map[string]any
-        if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
-            return nil, err
-        }
+	for scanner.Scan() {
+		var raw map[string]any
+		if err := json.Unmarshal(scanner.Bytes(), &raw); err != nil {
+			return nil, err
+		}
 
 		var ts int64
 		if t, ok := raw["time"].(string); ok {
@@ -53,21 +53,21 @@ func parseLogsToActions(buf *bytes.Buffer) ([]css.Action, error) {
 			ts = parsed.UnixMicro()
 		}
 
-        action := css.Action{
-            Timestamp: ts,
-            ID:        fmt.Sprint(raw["order id"]),
-            Action:    fmt.Sprint(raw["msg"]),
-            Target:    fmt.Sprint(raw["target"]),
-        }
+		action := css.Action{
+			Timestamp: ts,
+			ID:        fmt.Sprint(raw["order id"]),
+			Action:    fmt.Sprint(raw["msg"]),
+			Target:    fmt.Sprint(raw["target"]),
+		}
 
-        actions = append(actions, action)
-    }
+		actions = append(actions, action)
+	}
 
-    if err := scanner.Err(); err != nil {
-        return nil, err
-    }
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
 
-    return actions, nil
+	return actions, nil
 }
 
 func main() {
@@ -82,10 +82,10 @@ func main() {
 	// ------ Execution harness logic goes here using rate, min and max ------
 	var buf bytes.Buffer
 	kitchen := kitchen.NewKitchen(
-		*heaterCapacity, 
-		*coolerCapacity, 
-		*shelfCapacity, 
-		*decayFactor, 
+		*heaterCapacity,
+		*coolerCapacity,
+		*shelfCapacity,
+		*decayFactor,
 		slog.New(slog.NewJSONHandler(&buf, nil)),
 	)
 
@@ -102,10 +102,10 @@ func main() {
 
 		kitchen.PlaceOrder(order)
 		wg.Add(1)
-		go func (o css.Order)  {
+		go func(o css.Order) {
 			defer wg.Done()
 
-			randomDelay := *min + rand.N(*max - *min)
+			randomDelay := *min + rand.N(*max-*min)
 			time.Sleep(randomDelay)
 
 			kitchen.PickUpOrder(o.ID)
@@ -134,10 +134,10 @@ func printLogs(actions []css.Action) {
 	fmt.Println(strings.Repeat("-", 60))
 
 	for _, a := range actions {
-		fmt.Printf("%-20d | %-10s | %-10s | %-10s\n", 
-			a.Timestamp, 
-			a.Action, 
-			a.ID, 
+		fmt.Printf("%-20d | %-10s | %-10s | %-10s\n",
+			a.Timestamp,
+			a.Action,
+			a.ID,
 			a.Target,
 		)
 	}

@@ -43,20 +43,17 @@ func (s *storage) getFirstElement() *list.Element {
 }
 
 func (s *storage) remove(el *list.Element) {
-    if el == nil || el.Value == nil {
-        return
-    }
+	if el == nil || el.Value == nil {
+		return
+	}
 
-    // Access Value BEFORE removing from list
-    order := el.Value.(*KitchenOrder)
+	order := el.Value.(*KitchenOrder)
+	s.store.Remove(el)
 
-    s.store.Remove(el)
-
-    // Now update order properties...
-    if order.lastUpdated.IsZero() {
-        order.lastUpdated = order.cookedAt
-    }
-    order.Freshness -= time.Since(order.lastUpdated)
+	if order.lastUpdated.IsZero() {
+		order.lastUpdated = order.cookedAt
+	}
+	order.Freshness -= time.Since(order.lastUpdated)
 }
 
 func (s *storage) len() int {

@@ -48,9 +48,9 @@ type Kitchen struct {
 }
 
 func NewKitchen(
-	hotCapacity int, 
-	coldCapacity int, 
-	shelfCapacity int, 
+	hotCapacity int,
+	coldCapacity int,
+	shelfCapacity int,
 	decay int,
 	logger *slog.Logger,
 ) *Kitchen {
@@ -68,12 +68,12 @@ func NewKitchen(
 
 func (k *Kitchen) PlaceOrder(newOrder css.Order) {
 	order := &KitchenOrder{
-		ID: newOrder.ID,
-		Name: newOrder.Name,
+		ID:          newOrder.ID,
+		Name:        newOrder.Name,
 		Temperature: Temperature(newOrder.Temp),
-		Price: float64(newOrder.Price),
-		Freshness: time.Duration(newOrder.Freshness) * time.Second,
-		cookedAt: time.Now(),
+		Price:       float64(newOrder.Price),
+		Freshness:   time.Duration(newOrder.Freshness) * time.Second,
+		cookedAt:    time.Now(),
 	}
 
 	k.mu.Lock()
@@ -97,8 +97,8 @@ func (k *Kitchen) PickUpOrder(orderID string) (css.Order, bool) {
 
 	orderMeta, ok := k.index[orderID]
 	if !ok || orderMeta.el == nil || orderMeta.el.Value == nil {
-        return css.Order{}, false
-    }
+		return css.Order{}, false
+	}
 
 	order := orderMeta.el.Value.(*KitchenOrder)
 	k.removeFromStorage(orderMeta)
@@ -111,10 +111,10 @@ func (k *Kitchen) PickUpOrder(orderID string) (css.Order, bool) {
 	}
 
 	return css.Order{
-		ID: order.ID,
-		Name: order.Name,
-		Temp: string(order.Temperature),
-		Price: int(order.Price),
+		ID:        order.ID,
+		Name:      order.Name,
+		Temp:      string(order.Temperature),
+		Price:     int(order.Price),
 		Freshness: int(order.Freshness),
 	}, true
 }
@@ -164,7 +164,7 @@ func (k *Kitchen) placeInStorage(
 
 	k.index[order.ID] = storageInfo{el: el, storeTemp: currentTemp}
 
-	// Log order placement 
+	// Log order placement
 	k.logger.Info("place", "order id", order.ID, "target", k.getStorageName(currentTemp))
 }
 
@@ -241,15 +241,15 @@ func (k *Kitchen) discardShelfOrder() {
 
 func (k *Kitchen) removeFromStorage(meta storageInfo) {
 	if meta.el == nil || meta.el.Value == nil {
-        k.logger.Warn("attempted to remove nil element from storage")
-        return
-    }
+		k.logger.Warn("attempted to remove nil element from storage")
+		return
+	}
 
 	order, ok := meta.el.Value.(*KitchenOrder)
 	if !ok || order == nil {
-        return 
-    }
-    orderID := order.ID
+		return
+	}
+	orderID := order.ID
 
 	switch meta.storeTemp {
 	case TemperatureCold:
