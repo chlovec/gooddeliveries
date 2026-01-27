@@ -8,21 +8,6 @@ import (
 	"time"
 )
 
-// Action names
-const (
-	Place   = "place"
-	Move    = "move"
-	Pickup  = "pickup"
-	Discard = "discard"
-)
-
-// Target names
-const (
-	Heater = "heater"
-	Cooler = "cooler"
-	Shelf  = "shelf"
-)
-
 // OrderAdder allows us to treat both simple storage and complex shelfStorage
 // as valid targets for placement.
 type OrderAdder interface {
@@ -111,7 +96,7 @@ func (k *Kitchen) PickUpOrder(orderID string) (css.Order, bool) {
 	k.removeFromStorage(orderMeta)
 
 	// Log pickup
-	k.logger.Info("pickup", "order id", orderID, "target", k.getStorageName(orderMeta.storeTemp))
+	k.logger.Info(css.Pickup, "order id", orderID, "target", k.getStorageName(orderMeta.storeTemp))
 
 	if order == nil || order.Freshness <= 0 {
 		return css.Order{}, false
@@ -172,7 +157,7 @@ func (k *Kitchen) placeInStorage(
 	k.index[order.ID] = storageInfo{el: el, storeTemp: currentTemp}
 
 	// Log order placement
-	k.logger.Info("place", "order id", order.ID, "target", k.getStorageName(currentTemp))
+	k.logger.Info(css.Place, "order id", order.ID, "target", k.getStorageName(currentTemp))
 }
 
 func (k *Kitchen) getCapacity(temp Temperature) int {
@@ -208,7 +193,7 @@ func (k *Kitchen) moveShelfColdOrder() bool {
 	k.index[id] = storageInfo{el: newEl, storeTemp: TemperatureCold}
 
 	// Log move order - cooler
-	k.logger.Info(Move, "order id", id, "target", k.getStorageName(TemperatureCold))
+	k.logger.Info(css.Move, "order id", id, "target", k.getStorageName(TemperatureCold))
 
 	return true
 }
@@ -231,7 +216,7 @@ func (k *Kitchen) moveShelfHotOrder() bool {
 	k.index[id] = storageInfo{el: newEl, storeTemp: TemperatureHot}
 
 	// Log move order - heater
-	k.logger.Info(Move, "order id", id, "target", k.getStorageName(TemperatureHot))
+	k.logger.Info(css.Move, "order id", id, "target", k.getStorageName(TemperatureHot))
 
 	return true
 }
@@ -243,7 +228,7 @@ func (k *Kitchen) discardShelfOrder() {
 	k.removeFromStorage(meta)
 
 	// Log discard order - shelf
-	k.logger.Info(Discard, "order id", order.ID, "target", k.getStorageName(TemperatureRoom))
+	k.logger.Info(css.Discard, "order id", order.ID, "target", k.getStorageName(TemperatureRoom))
 }
 
 func (k *Kitchen) removeFromStorage(meta storageInfo) {
@@ -268,11 +253,11 @@ func (k *Kitchen) removeFromStorage(meta storageInfo) {
 func (k *Kitchen) getStorageName(temp Temperature) string {
 	switch temp {
 	case TemperatureCold:
-		return Cooler
+		return css.Cooler
 	case TemperatureHot:
-		return Heater
+		return css.Heater
 	case TemperatureRoom:
-		return Shelf
+		return css.Shelf
 	default:
 		return "unknown"
 	}
