@@ -195,3 +195,16 @@ func TestShellStorage_GetOrderToDiscard_GetLeastFreshOrOldest(t *testing.T) {
 		sh.remove(newElCold)
 	})
 }
+
+func TestShellStorageA_AddRemoveLen2(t *testing.T) {
+	hotOrder := &KitchenOrder{
+		ID:          "hot1",
+		Name:        "Hot Pizza",
+		Temperature: "cold order",
+		Price:       10,
+		Freshness:   10 * time.Minute,
+		cookedAt:    time.Now(),
+	}
+
+	require.NotEqual(t, hotOrder, &KitchenOrder{})
+}

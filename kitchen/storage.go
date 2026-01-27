@@ -14,11 +14,11 @@ const (
 )
 
 type KitchenOrder struct {
-	ID          string
-	Name        string
-	Temperature Temperature
-	Price       float64
-	Freshness   time.Duration
+	ID          string        `validate:"required"`
+	Name        string        `validate:"required"`
+	Temperature Temperature   `validate:"temp"`
+	Price       float64       `validate:"gt=0"`
+	Freshness   time.Duration `validate:"gt=0"`
 	cookedAt    time.Time
 	lastUpdated time.Time
 }

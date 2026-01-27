@@ -19,6 +19,11 @@ $ go run main.go --auth=agbo6gdrs1wd
 
 ## Discard criteria
 
-When there is no available storage for a new placement request, the system looks for an item in the shelf to discard to make room for the new request. It looks for the first cooler-order and first-hot order on the shelf and picks one with the least freshness and discards that. If both have the same freshness, it discards the oldest.
+When there is no available storage for a new placement request, the system looks for an item in the shelf to discard to make room for the new request. It looks for the first cooler-order and first-hot order on the shelf and picks one with the least freshness and discards that. If both have the same freshness, it discards the oldest. If there is no cold or hot item on the shelf, it chooses the oldest shelf item and discards it.
 
-If there is no cold or hot item on the shelf, it chooses the oldest shelf item and discards it.
+In creating this solution, I made assumption of what a valid order should be:
+- ID is required
+- Name is required
+- Price must be greater than 0
+- Temperature must be one of hot, cold or room (these are given)
+- Freshness must be positive (we don't want to store food that has already decayed)

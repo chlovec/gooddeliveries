@@ -66,29 +66,36 @@ func NewKitchen(
 	}
 }
 
-func (k *Kitchen) PlaceOrder(newOrder css.Order) {
-	order := &KitchenOrder{
-		ID:          newOrder.ID,
-		Name:        newOrder.Name,
-		Temperature: Temperature(newOrder.Temp),
-		Price:       float64(newOrder.Price),
-		Freshness:   time.Duration(newOrder.Freshness) * time.Second,
+func (k *Kitchen) PlaceOrder(order css.Order) error {
+	// validate order
+	if err := IsValidOrder(order); err != nil {
+		return err
+	}
+
+	kOrder := &KitchenOrder{
+		ID:          order.ID,
+		Name:        order.Name,
+		Temperature: Temperature(order.Temp),
+		Price:       float64(order.Price),
+		Freshness:   time.Duration(order.Freshness) * time.Second,
 		cookedAt:    time.Now(),
 	}
 
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	order.cookedAt = time.Now()
+	kOrder.cookedAt = time.Now()
 
-	switch order.Temperature {
+	switch kOrder.Temperature {
 	case TemperatureHot:
-		k.placeHotOrder(order)
+		k.placeHotOrder(kOrder)
 	case TemperatureCold:
-		k.placeColdOrder(order)
+		k.placeColdOrder(kOrder)
 	default:
-		k.placeShelfOrder(order)
+		k.placeShelfOrder(kOrder)
 	}
+
+	return nil
 }
 
 func (k *Kitchen) PickUpOrder(orderID string) (css.Order, bool) {
@@ -240,11 +247,6 @@ func (k *Kitchen) discardShelfOrder() {
 }
 
 func (k *Kitchen) removeFromStorage(meta storageInfo) {
-	if meta.el == nil || meta.el.Value == nil {
-		k.logger.Warn("attempted to remove nil element from storage")
-		return
-	}
-
 	order, ok := meta.el.Value.(*KitchenOrder)
 	if !ok || order == nil {
 		return
