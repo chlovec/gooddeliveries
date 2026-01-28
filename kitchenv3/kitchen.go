@@ -3,6 +3,7 @@ package kitchenv3
 import (
 	"challenge/client"
 	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
@@ -73,11 +74,12 @@ func (k *Kitchen) PickUpOrder(orderID string) (client.Order, error) {
 		foundOrder = order
 	} else if order, ok := k.shelf.Remove(orderID); ok {
 		foundOrder = order
-		k.shelf.mu.Unlock()
 	}
 
 	if foundOrder == nil {
 		return client.Order{}, errors.New("order not found")
+	} else if foundOrder.Freshness <= 0 {
+		return client.Order{}, fmt.Errorf("order has expired: %+v", foundOrder.Freshness)
 	}
 
 	return client.Order{
@@ -99,9 +101,9 @@ func (k *Kitchen) placeInShelf(order *KitchenOrder) bool {
 		return k.shelf.Add(order)
 	}
 
-	if order.Temperature == TemperatureCold && k.moveShelfColdOrder() {
+	if order.Temperature == TemperatureCold && k.moveShelfHotOrder() {
 		k.moveShelfColdOrder()
-	} else if order.Temperature == TemperatureHot && k.moveShelfHotOrder() {
+	} else if order.Temperature == TemperatureHot && k.moveShelfColdOrder() {
 		k.moveShelfHotOrder()
 	} else {
 		toDiscard := k.shelf.GetOrderToDiscard()
@@ -128,7 +130,7 @@ func (k *Kitchen) moveShelfColdOrder() bool {
 }
 
 func (k *Kitchen) moveShelfHotOrder() bool {
-	if !k.cooler.HasSpace() {
+	if !k.heater.HasSpace() {
 		return false
 	}
 
@@ -140,5 +142,5 @@ func (k *Kitchen) moveShelfHotOrder() bool {
 	if _, ok := k.shelf.Remove(order.ID); !ok {
 		return false
 	}
-	return k.cooler.Add(order)
+	return k.heater.Add(order)
 }

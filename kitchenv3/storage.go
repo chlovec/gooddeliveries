@@ -25,6 +25,13 @@ type KitchenOrder struct {
 	lastUpdated time.Time
 }
 
+func (k *KitchenOrder) getFreshness(refTime time.Time, decayFactor int) time.Duration {
+	freshnessValue := float64(k.Freshness)
+	timeInStorage := float64(refTime.Sub(k.cookedAt))
+	remaining := freshnessValue - (timeInStorage * float64(decayFactor))
+	return time.Duration(remaining)
+}
+
 // -- General storage for Cooler and Heater --
 
 type Storage struct {
@@ -63,15 +70,28 @@ func (s *Storage) Remove(orderid string) (*KitchenOrder, bool) {
 	defer s.mu.Unlock()
 
 	order, ok := s.items[orderid]
-	if ok {
-		delete(s.items, orderid)
-		s.count--
+	if !ok {
+		return order, ok
 	}
+
+	delete(s.items, orderid)
+	s.count--
+
+	// Update freshness
+	if order.lastUpdated.IsZero() {
+		order.lastUpdated = order.cookedAt
+	}
+	order.Freshness = order.getFreshness(time.Now(), 1)
+
 	return order, ok
 }
 
 func (s *Storage) HasSpace() bool {
 	return atomic.LoadInt64(&s.count) < int64(s.capacity)
+}
+
+func (s *Storage) Len() int64 {
+	return s.count
 }
 
 // -- Shelf storage --
@@ -146,8 +166,12 @@ func (s *ShelfStorage) Remove(orderid string) (*KitchenOrder, bool) {
 
 	delete(s.items, orderid)
 
-	order.lastUpdated = time.Now()
-	order.Freshness -= time.Duration(s.decay) * time.Second * order.lastUpdated.Sub(order.cookedAt)
+	decay := s.decay
+	if order.Temperature == TemperatureRoom {
+		decay = 1
+	}
+
+	order.Freshness = order.getFreshness(time.Now(), decay)
 
 	s.count--
 	return order, true
@@ -218,4 +242,8 @@ func (s *ShelfStorage) GetFirstRoomOrder() *KitchenOrder {
 
 func (s *ShelfStorage) HasSpace() bool {
 	return atomic.LoadInt64(&s.count) < int64(s.capacity)
+}
+
+func (s *ShelfStorage) Len() int64 {
+	return s.count
 }
