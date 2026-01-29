@@ -7,204 +7,338 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestShellStorageA_AddRemoveLen(t *testing.T) {
-	decay := 2
-	sh := newShelfStorage(decay)
-	now := time.Now()
-
-	hotOrder := &KitchenOrder{
-		ID:          "hot1",
+func TestStorage_AddRemoveHasSpace(t *testing.T) {
+	order1 := &KitchenOrder{
+		ID:          "order1",
 		Name:        "Hot Pizza",
 		Temperature: TemperatureHot,
 		Price:       10,
 		Freshness:   10 * time.Minute,
-		cookedAt:    now.Add(-5 * time.Minute),
 	}
 
-	coldOrder := &KitchenOrder{
-		ID:          "cold1",
+	order2 := &KitchenOrder{
+		ID:          "order2",
 		Name:        "Cold Salad",
 		Temperature: TemperatureCold,
 		Price:       5,
 		Freshness:   15 * time.Minute,
-		cookedAt:    now.Add(-10 * time.Minute),
 	}
 
-	roomOrder := &KitchenOrder{
-		ID:          "room1",
+	order3 := &KitchenOrder{
+		ID:          "order3",
 		Name:        "Room Sandwich",
 		Temperature: TemperatureRoom,
 		Price:       7,
 		Freshness:   1 * time.Minute,
-		cookedAt:    now.Add(-15 * time.Minute),
 	}
 
-	noTempOrder := &KitchenOrder{
-		ID:        "room1",
-		Name:      "Room Sandwich",
-		Price:     7,
-		Freshness: 20 * time.Minute,
-		cookedAt:  now.Add(-15 * time.Minute),
-	}
+	s := NewStorage(2)
+	require.True(t, s.HasSpace())
 
-	// Add orders
-	hotEl := sh.add(hotOrder)
-	coldEl := sh.add(coldOrder)
-	roomEl := sh.add(roomOrder)
-	noTempEl := sh.add(noTempOrder)
+	ok := s.Add(order1)
+	require.True(t, ok)
+	require.True(t, s.HasSpace())
 
-	require.Equal(t, 3, sh.len(), "storage should contain exactly 3 items")
-	require.Nil(t, noTempEl, "order without a valid temperature should not be added to the storage")
+	ok = s.Add(order2)
+	require.True(t, ok)
+	require.False(t, s.HasSpace())
 
-	require.NotNil(t, hotEl, "failed to add hot order to storage")
-	require.Equal(t, hotOrder, hotEl.Value, "hot order should match what's in storage")
+	ok = s.Add(order3)
+	require.False(t, ok)
+	require.False(t, s.HasSpace())
 
-	require.NotNil(t, coldEl, "failed to add cold order to storage")
-	require.Equal(t, coldOrder, coldEl.Value, "cold order should match what's in storage")
+	storedOrder1, ok := s.Remove(order1.ID)
+	require.True(t, ok)
+	require.Equal(t, order1, storedOrder1)
 
-	require.NotNil(t, roomEl, "failed to add room order to storage")
-	require.Equal(t, roomOrder, roomEl.Value, "room order should match what's in storage")
+	storedOrder2, ok := s.Remove(order2.ID)
+	require.True(t, ok)
+	require.Equal(t, order2, storedOrder2)
 
-	sh.remove(nil)
-	require.Equal(t, 3, sh.len(), "storage should contain exactly 3 items")
-
-	sh.remove(hotEl)
-	require.Equal(t, 2, sh.len(), "storage should contain exactly 2 items")
-
-	sh.remove(coldEl)
-	require.Equal(t, 1, sh.len(), "storage should contain exactly 1 items")
-
-	sh.remove(roomEl)
-	require.Zero(t, sh.len(), "storage should contain exactly 0 items")
-
-	el := sh.add(nil)
-	require.Nil(t, el, "storage should not add nil order")
+	storedOrder3, ok := s.Remove(order3.ID)
+	require.False(t, ok)
+	require.Nil(t, storedOrder3)
 }
 
-func TestShellStorage_GetOrderToDiscard_GetLeastFreshOrOldest(t *testing.T) {
-	sh := newShelfStorage(2)
-	now := time.Now()
-
-	hotOrder := &KitchenOrder{
-		ID:          "hot1",
+func TestShellStorage_AddRemoveHasSpace(t *testing.T) {
+	order1 := &KitchenOrder{
+		ID:          "order1",
 		Name:        "Hot Pizza",
 		Temperature: TemperatureHot,
 		Price:       10,
 		Freshness:   10 * time.Minute,
-		cookedAt:    now.Add(-5 * time.Minute),
 	}
 
-	coldOrder := &KitchenOrder{
-		ID:          "cold1",
+	order2 := &KitchenOrder{
+		ID:          "order2",
 		Name:        "Cold Salad",
 		Temperature: TemperatureCold,
 		Price:       5,
-		Freshness:   10 * time.Minute,
-		cookedAt:    now.Add(-10 * time.Minute),
+		Freshness:   15 * time.Minute,
 	}
 
-	roomOrder := &KitchenOrder{
-		ID:          "room1",
+	order3 := &KitchenOrder{
+		ID:          "order3",
 		Name:        "Room Sandwich",
 		Temperature: TemperatureRoom,
 		Price:       7,
 		Freshness:   1 * time.Minute,
-		cookedAt:    now.Add(-15 * time.Minute),
 	}
 
-	roomEl := sh.add(roomOrder)
-	hotEl := sh.add(hotOrder)
-	coldEl := sh.add(coldOrder)
+	order4 := &KitchenOrder{
+		ID:          "order4",
+		Name:        "Room Sandwich",
+		Temperature: TemperatureRoom,
+		Price:       7,
+		Freshness:   1 * time.Minute,
+	}
 
-	t.Run("Discard/PreferColdOverHot_WhenColdIsLessFresh", func(t *testing.T) {
-		el := sh.getOrderToDiscard()
-		require.Equal(t, el, coldEl)
-	})
+	s := NewShelfStorage(3, 2)
+	require.True(t, s.HasSpace())
 
-	t.Run("Discard/ReturnHot_WhenColdShelfIsEmpty", func(t *testing.T) {
-		sh.remove(coldEl)
-		el := sh.getOrderToDiscard()
-		require.Equal(t, el, hotEl)
-	})
+	ok := s.Add(order1)
+	require.True(t, ok)
+	require.True(t, s.HasSpace())
+	require.Equal(t, 1, s.hotItems.Len())
+	require.Zero(t, s.coldItems.Len())
+	require.Zero(t, s.roomItems.Len())
 
-	t.Run("Discard/ReturnRoom_WhenColdAndHotShelvesAreEmpty", func(t *testing.T) {
-		sh.remove(hotEl)
-		el := sh.getOrderToDiscard()
-		require.Equal(t, el, roomEl)
+	ok = s.Add(order2)
+	require.True(t, ok)
+	require.True(t, s.HasSpace())
+	require.Equal(t, 1, s.hotItems.Len())
+	require.Equal(t, 1, s.coldItems.Len())
+	require.Zero(t, s.roomItems.Len())
 
-		sh.remove(roomEl)
-	})
+	ok = s.Add(order3)
+	require.True(t, ok)
+	require.False(t, s.HasSpace())
+	require.Equal(t, 1, s.hotItems.Len())
+	require.Equal(t, 1, s.coldItems.Len())
+	require.Equal(t, 1, s.roomItems.Len())
 
-	t.Run("Discard/UpdatePrecedence_WhenNewColdOrderIsLeastFresh", func(t *testing.T) {
-		newColdEl := sh.add(coldOrder)
-		el := sh.getOrderToDiscard()
-		require.Equal(t, el, newColdEl)
-		require.NotEqual(t, el, coldEl)
-		sh.remove(newColdEl)
-	})
+	ok = s.Add(order4)
+	require.False(t, ok)
+	require.False(t, s.HasSpace())
+	require.Equal(t, 1, s.hotItems.Len())
+	require.Equal(t, 1, s.coldItems.Len())
+	require.Equal(t, 1, s.roomItems.Len())
 
-	t.Run("Comparison/PickHot_WhenHotHasLowerCalculatedFreshness", func(t *testing.T) {
-		coldOrder.cookedAt = now.Add(-5 * time.Minute)
-		coldOrder.Freshness = 30 * time.Second
+	storedOrder1, ok := s.Remove(order1.ID)
+	require.True(t, ok)
+	require.Equal(t, order1, storedOrder1)
+	require.Zero(t, s.hotItems.Len())
+	require.Equal(t, 1, s.coldItems.Len())
+	require.Equal(t, 1, s.roomItems.Len())
 
-		hotOrder.cookedAt = now.Add(-5 * time.Minute)
-		hotOrder.Freshness = 20 * time.Second
+	storedOrder2, ok := s.Remove(order2.ID)
+	require.True(t, ok)
+	require.Equal(t, order2, storedOrder2)
+	require.Zero(t, s.hotItems.Len())
+	require.Zero(t, s.coldItems.Len())
+	require.Equal(t, 1, s.roomItems.Len())
 
-		newElCold := sh.add(coldOrder)
-		newElHot := sh.add(hotOrder)
-		el := sh.getLeastFreshOrOldest(newElCold, newElHot)
-		require.Equal(t, el, newElHot)
+	storedOrder3, ok := s.Remove(order3.ID)
+	require.True(t, ok)
+	require.Equal(t, order3, storedOrder3)
+	require.Zero(t, s.hotItems.Len())
+	require.Zero(t, s.coldItems.Len())
+	require.Zero(t, s.roomItems.Len())
 
-		sh.remove(newElHot)
-		sh.remove(newElCold)
-	})
-
-	t.Run("Comparison/PickCold_WhenColdIsOlderDespiteHigherFreshness", func(t *testing.T) {
-		coldOrder.cookedAt = now.Add(-30 * time.Minute)
-		coldOrder.Freshness = 60 * time.Minute
-
-		hotOrder.cookedAt = now.Add(-20 * time.Minute)
-		hotOrder.Freshness = 40 * time.Minute
-
-		newElCold := sh.add(coldOrder)
-		newElHot := sh.add(hotOrder)
-		el := sh.getLeastFreshOrOldest(newElCold, newElHot)
-
-		require.Equal(t, el, newElCold)
-
-		sh.remove(newElHot)
-		sh.remove(newElCold)
-	})
-
-	t.Run("TieBreaking/PreferHot_WhenStatsAreIdentical", func(t *testing.T) {
-		// Matches the 'default' case in getLeastFreshOrOldest switch
-		require.Zero(t, sh.len(), 0)
-		coldOrder.cookedAt = now.Add(-30 * time.Minute)
-		coldOrder.Freshness = 30 * time.Minute
-
-		hotOrder.cookedAt = now.Add(-30 * time.Minute)
-		hotOrder.Freshness = 30 * time.Minute
-
-		newElCold := sh.add(coldOrder)
-		newElHot := sh.add(hotOrder)
-		el := sh.getLeastFreshOrOldest(newElCold, newElHot)
-
-		require.Equal(t, el, newElHot)
-
-		sh.remove(newElHot)
-		sh.remove(newElCold)
-	})
+	storedOrder4, ok := s.Remove(order4.ID)
+	require.False(t, ok)
+	require.Nil(t, storedOrder4)
 }
 
-func TestShellStorageA_AddRemoveLen2(t *testing.T) {
-	hotOrder := &KitchenOrder{
-		ID:          "hot1",
-		Name:        "Hot Pizza",
-		Temperature: "cold order",
-		Price:       10,
-		Freshness:   10 * time.Minute,
-		cookedAt:    time.Now(),
+func TestShellStorage_GetOrderToDiscard(t *testing.T) {
+	coldOrder1 := &KitchenOrder{
+		ID:          "coldOrder1",
+		Name:        "Cold Salad",
+		Temperature: TemperatureCold,
+		Price:       5,
+		Freshness:   15 * time.Minute,
 	}
 
-	require.NotEqual(t, hotOrder, &KitchenOrder{})
+	coldOrder2 := &KitchenOrder{
+		ID:          "coldOrder2",
+		Name:        "Cold Salad",
+		Temperature: TemperatureCold,
+		Price:       5,
+		Freshness:   5 * time.Minute,
+	}
+
+	hotOrder1 := &KitchenOrder{
+		ID:          "hotOrder1",
+		Name:        "hot soup",
+		Temperature: TemperatureHot,
+		Price:       5,
+		Freshness:   15 * time.Minute,
+	}
+
+	hotOrder2 := &KitchenOrder{
+		ID:          "hotOrder2",
+		Name:        "hot pizza",
+		Temperature: TemperatureHot,
+		Price:       5,
+		Freshness:   5 * time.Minute,
+	}
+
+	shelfOrder1 := &KitchenOrder{
+		ID:          "shelfOrder1",
+		Name:        "Room Sandwich",
+		Temperature: TemperatureRoom,
+		Price:       7,
+		Freshness:   1 * time.Minute,
+	}
+
+	shelfOrder2 := &KitchenOrder{
+		ID:          "shelfOrder2",
+		Name:        "Room Water",
+		Temperature: TemperatureRoom,
+		Price:       7,
+		Freshness:   1 * time.Minute,
+	}
+
+	const capacity int64 = 6
+	const decay = 2
+
+	t.Run("ReturnsFirstColdItem_WhenColdItems", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(coldOrder1)
+		s.Add(coldOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, coldOrder1, actual)
+		require.Equal(t, 2, s.coldItems.Len())
+		require.Zero(t, s.hotItems.Len())
+		require.Zero(t, s.roomItems.Len())
+	})
+
+	t.Run("ReturnsFirstHotItem_WhenHotItems", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(hotOrder2)
+		s.Add(hotOrder1)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, hotOrder2, actual)
+		require.Equal(t, 2, s.hotItems.Len())
+		require.Zero(t, s.coldItems.Len())
+		require.Zero(t, s.roomItems.Len())
+
+	})
+
+	t.Run("ReturnsFirstShelfItem_WhenShelfItems", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(shelfOrder1)
+		s.Add(shelfOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, shelfOrder1, actual)
+		require.Equal(t, 2, s.roomItems.Len())
+		require.Zero(t, s.coldItems.Len())
+		require.Zero(t, s.hotItems.Len())
+	})
+
+	t.Run("ReturnsFirstHotItem_WhenHotItemsAndShelfItems", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(shelfOrder1)
+		s.Add(shelfOrder2)
+		s.Add(hotOrder1)
+		s.Add(hotOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, hotOrder1, actual)
+		require.Equal(t, 2, s.hotItems.Len())
+		require.Equal(t, 2, s.roomItems.Len())
+		require.Zero(t, s.coldItems.Len())
+	})
+
+	t.Run("ReturnsFirstColdItem_WhenColdItemsAndShelfItems", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(shelfOrder1)
+		s.Add(shelfOrder2)
+		s.Add(coldOrder1)
+		s.Add(coldOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, coldOrder1, actual)
+		require.Equal(t, 2, s.coldItems.Len())
+		require.Equal(t, 2, s.roomItems.Len())
+		require.Zero(t, s.hotItems.Len())
+	})
+
+	t.Run("ReturnsFirstHotItem_WhenColdItemsAndHotItems_AndHotItemIsFirst", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(hotOrder1)
+		s.Add(coldOrder1)
+		s.Add(hotOrder2)
+		s.Add(coldOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, hotOrder1, actual)
+		require.Equal(t, 2, s.coldItems.Len())
+		require.Equal(t, 2, s.hotItems.Len())
+		require.Zero(t, s.roomItems.Len())
+	})
+
+	t.Run("ReturnsFirstColdItem_WhenColdItemsAndHotItems_AndColdItemIsFirst", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(coldOrder1)
+		s.Add(hotOrder1)
+		s.Add(hotOrder2)
+		s.Add(coldOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, coldOrder1, actual)
+		require.Equal(t, 2, s.coldItems.Len())
+		require.Equal(t, 2, s.hotItems.Len())
+		require.Zero(t, s.roomItems.Len())
+	})
+
+	t.Run("ReturnsFirstColdItem_WhenAllItemsItems_AndColdItemIsBeforeHotItem", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(shelfOrder1)
+		s.Add(shelfOrder2)
+		s.Add(coldOrder1)
+		s.Add(hotOrder1)
+		s.Add(hotOrder2)
+		s.Add(coldOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, coldOrder1, actual)
+		require.Equal(t, 2, s.coldItems.Len())
+		require.Equal(t, 2, s.hotItems.Len())
+		require.Equal(t, 2, s.roomItems.Len())
+	})
+
+	t.Run("ReturnsFirstHotItem_WhenAllItemsItems_AndHotItemIsBeforeColdItem", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		s.Add(shelfOrder1)
+		s.Add(shelfOrder2)
+		s.Add(hotOrder1)
+		s.Add(coldOrder1)
+		s.Add(hotOrder2)
+		s.Add(coldOrder2)
+
+		actual := s.GetOrderToDiscard()
+
+		require.Equal(t, hotOrder1, actual)
+		require.Equal(t, 2, s.coldItems.Len())
+		require.Equal(t, 2, s.hotItems.Len())
+		require.Equal(t, 2, s.roomItems.Len())
+	})
+
+	t.Run("ReturnsNil_WhenEmpty", func(t *testing.T) {
+		s := NewShelfStorage(capacity, decay)
+		actual := s.GetOrderToDiscard()
+		require.Nil(t, actual)
+	})
 }

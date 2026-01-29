@@ -1,264 +1,172 @@
 package kitchen
 
 import (
-	css "challenge/client"
-	"container/list"
+	"challenge/client"
+	"errors"
+	"fmt"
 	"log/slog"
 	"sync"
 	"time"
 )
 
-// OrderAdder allows us to treat both simple storage and complex shelfStorage
-// as valid targets for placement.
-type OrderAdder interface {
-	add(order *KitchenOrder) *list.Element
-	len() int
-}
-
-type storageInfo struct {
-	el        *list.Element
-	storeTemp Temperature
-}
-
 type Kitchen struct {
-	mu            sync.Mutex
-	hotCapacity   int
-	coldCapacity  int
-	shelfCapacity int
-	heater        *storage
-	cooler        *storage
-	shelf         *shelfStorage
-	index         map[string]storageInfo
-	logger        *slog.Logger
+	heater *Storage
+	cooler *Storage
+	shelf  *ShelfStorage
+	logger *slog.Logger
+	mu     sync.Mutex
 }
 
 func NewKitchen(
-	hotCapacity int,
-	coldCapacity int,
-	shelfCapacity int,
+	hotCapacity int64,
+	coldCapacity int64,
+	shelfCapacity int64,
 	decay int,
 	logger *slog.Logger,
 ) *Kitchen {
 	return &Kitchen{
-		hotCapacity:   hotCapacity,
-		coldCapacity:  coldCapacity,
-		shelfCapacity: shelfCapacity,
-		heater:        newStorage(),
-		cooler:        newStorage(),
-		shelf:         newShelfStorage(decay),
-		index:         make(map[string]storageInfo),
-		logger:        logger,
+		heater: NewStorage(hotCapacity),
+		cooler: NewStorage(coldCapacity),
+		shelf:  NewShelfStorage(shelfCapacity, decay),
+		logger: logger,
 	}
 }
 
-func (k *Kitchen) PlaceOrder(order css.Order) error {
+func (k *Kitchen) PlaceOrder(newOrder client.Order) error {
 	// validate order
-	if err := IsValidOrder(order); err != nil {
+	if err := IsValidOrder(newOrder); err != nil {
 		return err
 	}
 
-	kOrder := &KitchenOrder{
-		ID:          order.ID,
-		Name:        order.Name,
-		Temperature: Temperature(order.Temp),
-		Price:       float64(order.Price),
-		Freshness:   time.Duration(order.Freshness) * time.Second,
+	order := &KitchenOrder{
+		ID:          newOrder.ID,
+		Name:        newOrder.Name,
+		Temperature: Temperature(newOrder.Temp),
+		Price:       newOrder.Price,
+		Freshness:   time.Duration(newOrder.Freshness) * time.Second,
 		cookedAt:    time.Now(),
 	}
 
-	k.mu.Lock()
-	defer k.mu.Unlock()
-
-	kOrder.cookedAt = time.Now()
-
-	switch kOrder.Temperature {
+	var placed bool
+	var storageName string
+	switch order.Temperature {
 	case TemperatureHot:
-		k.placeHotOrder(kOrder)
+		placed = k.heater.Add(order)
+		storageName = client.Heater
 	case TemperatureCold:
-		k.placeColdOrder(kOrder)
+		placed = k.cooler.Add(order)
+		storageName = client.Cooler
 	default:
-		k.placeShelfOrder(kOrder)
+		placed = k.shelf.Add(order)
+		storageName = client.Shelf
 	}
 
+	if !placed {
+		placed = k.placeInShelf(order)
+		storageName = client.Shelf
+	}
+
+	// Log pickup and return results
+	if !placed {
+		return errors.New("unable to place order")
+	}
+
+	k.logger.Info(client.Place, "order id", order.ID, "target", storageName)
 	return nil
 }
 
-func (k *Kitchen) PickUpOrder(orderID string) (css.Order, bool) {
+func (k *Kitchen) PickUpOrder(orderID string) (client.Order, error) {
+	var foundOrder *KitchenOrder
+
+	// Try to find and remove the order from  any of the three storages
+	var storageName string
+
+	if order, ok := k.heater.Remove(orderID); ok {
+		foundOrder = order
+		storageName = client.Heater
+	} else if order, ok := k.cooler.Remove(orderID); ok {
+		foundOrder = order
+		storageName = client.Cooler
+	} else if order, ok := k.shelf.Remove(orderID); ok {
+		storageName = client.Shelf
+		foundOrder = order
+	}
+
+	if foundOrder == nil {
+		return client.Order{}, errors.New("order not found")
+	}
+
+	k.logger.Info(client.Pickup, "order id", foundOrder.ID, "target", storageName)
+
+	if foundOrder.Freshness <= 0 {
+		// Should this also be logged as discarded?
+		return client.Order{}, fmt.Errorf("order has expired: %+v", foundOrder.Freshness)
+	}
+
+	return client.Order{
+		ID:        foundOrder.ID,
+		Name:      foundOrder.Name,
+		Temp:      string(foundOrder.Temperature),
+		Price:     foundOrder.Price,
+		Freshness: int(foundOrder.Freshness),
+	}, nil
+}
+
+// -- Helper Functions --
+
+func (k *Kitchen) placeInShelf(order *KitchenOrder) bool {
 	k.mu.Lock()
 	defer k.mu.Unlock()
 
-	orderMeta, ok := k.index[orderID]
-	if !ok || orderMeta.el == nil || orderMeta.el.Value == nil {
-		return css.Order{}, false
+	if k.shelf.HasSpace() {
+		return k.shelf.Add(order)
 	}
 
-	order := orderMeta.el.Value.(*KitchenOrder)
-	k.removeFromStorage(orderMeta)
-
-	// Log pickup
-	k.logger.Info(css.Pickup, "order id", orderID, "target", k.getStorageName(orderMeta.storeTemp))
-
-	if order == nil || order.Freshness <= 0 {
-		return css.Order{}, false
+	if order.Temperature == TemperatureCold && k.moveShelfHotOrder() {
+		k.moveShelfColdOrder()
+	} else if order.Temperature == TemperatureHot && k.moveShelfColdOrder() {
+		k.moveShelfHotOrder()
+	} else {
+		toDiscard := k.shelf.GetOrderToDiscard()
+		k.shelf.Remove(toDiscard.ID)
+		k.logger.Info(client.Discard, "order id", toDiscard.ID, "target", client.Shelf)
 	}
 
-	return css.Order{
-		ID:        order.ID,
-		Name:      order.Name,
-		Temp:      string(order.Temperature),
-		Price:     int(order.Price),
-		Freshness: int(order.Freshness),
-	}, true
-}
-
-func (k *Kitchen) placeHotOrder(order *KitchenOrder) {
-	k.placeInStorage(order, k.heater, TemperatureHot, k.moveShelfColdOrder)
-}
-
-func (k *Kitchen) placeColdOrder(order *KitchenOrder) {
-	k.placeInStorage(order, k.cooler, TemperatureCold, k.moveShelfHotOrder)
-}
-
-func (k *Kitchen) placeShelfOrder(order *KitchenOrder) {
-	// For room orders, primary is the shelf. If there no available space in the shelf
-	// An item will be discarded from the shelf.
-	k.placeInStorage(order, k.shelf, TemperatureRoom, nil)
-}
-
-func (k *Kitchen) placeInStorage(
-	order *KitchenOrder, primary OrderAdder, primaryTemp Temperature, moveFunc func() bool,
-) {
-	var el *list.Element
-	var currentTemp Temperature
-
-	switch {
-	// Preferred storage has room
-	case primary.len() < k.getCapacity(primaryTemp):
-		el = primary.add(order)
-		currentTemp = primaryTemp
-
-	// Shelf has space
-	case k.shelf.len() < k.shelfCapacity:
-		el = k.shelf.add(order)
-		currentTemp = TemperatureRoom
-
-	// Move hot / cold items out of the shelf
-	case moveFunc != nil && moveFunc():
-		el = k.shelf.add(order)
-		currentTemp = TemperatureRoom
-
-	// Forced eviction
-	default:
-		k.discardShelfOrder()
-		el = k.shelf.add(order)
-		currentTemp = TemperatureRoom
-	}
-
-	k.index[order.ID] = storageInfo{el: el, storeTemp: currentTemp}
-
-	// Log order placement
-	k.logger.Info(css.Place, "order id", order.ID, "target", k.getStorageName(currentTemp))
-}
-
-func (k *Kitchen) getCapacity(temp Temperature) int {
-	switch temp {
-	case TemperatureHot:
-		return k.hotCapacity
-	case TemperatureCold:
-		return k.coldCapacity
-	case TemperatureRoom:
-		return k.shelfCapacity
-	default:
-		return 0
-	}
+	return k.shelf.Add(order)
 }
 
 func (k *Kitchen) moveShelfColdOrder() bool {
-	if k.cooler.len() >= k.coldCapacity {
+	if !k.cooler.HasSpace() {
 		return false
 	}
 
-	el := k.shelf.getFirstColdOrder()
-	if el == nil {
+	order := k.shelf.GetFirstColdOrder()
+	if order == nil || !k.cooler.Add(order) {
 		return false
 	}
 
-	order := el.Value.(*KitchenOrder)
-	id := order.ID
+	if _, ok := k.shelf.Remove(order.ID); !ok {
+		return false
+	}
 
-	k.shelf.remove(el)
-	delete(k.index, id)
-
-	newEl := k.cooler.add(order)
-	k.index[id] = storageInfo{el: newEl, storeTemp: TemperatureCold}
-
-	// Log move order - cooler
-	k.logger.Info(css.Move, "order id", id, "target", k.getStorageName(TemperatureCold))
-
+	k.logger.Info(client.Move, "order id", order.ID, "target", client.Cooler)
 	return true
 }
 
 func (k *Kitchen) moveShelfHotOrder() bool {
-	if k.heater.len() >= k.hotCapacity {
+	if !k.heater.HasSpace() {
 		return false
 	}
-	el := k.shelf.getFirstHotOrder()
-	if el == nil {
+
+	order := k.shelf.GetFirstHotOrder()
+	if order == nil || !k.heater.Add(order) {
 		return false
 	}
-	order := el.Value.(*KitchenOrder)
-	id := order.ID
 
-	k.shelf.remove(el)
-	delete(k.index, id)
+	if _, ok := k.shelf.Remove(order.ID); !ok {
+		return false
+	}
 
-	newEl := k.heater.add(order)
-	k.index[id] = storageInfo{el: newEl, storeTemp: TemperatureHot}
-
-	// Log move order - heater
-	k.logger.Info(css.Move, "order id", id, "target", k.getStorageName(TemperatureHot))
-
+	k.logger.Info(client.Move, "order id", order.ID, "target", client.Heater)
 	return true
-}
-
-func (k *Kitchen) discardShelfOrder() {
-	el := k.shelf.getOrderToDiscard()
-	order := el.Value.(*KitchenOrder)
-	meta := k.index[order.ID]
-	k.removeFromStorage(meta)
-
-	// Log discard order - shelf
-	k.logger.Info(css.Discard, "order id", order.ID, "target", k.getStorageName(TemperatureRoom))
-}
-
-func (k *Kitchen) removeFromStorage(meta storageInfo) {
-	order, ok := meta.el.Value.(*KitchenOrder)
-	if !ok || order == nil {
-		return
-	}
-	orderID := order.ID
-
-	switch meta.storeTemp {
-	case TemperatureCold:
-		k.cooler.remove(meta.el)
-	case TemperatureHot:
-		k.heater.remove(meta.el)
-	default:
-		k.shelf.remove(meta.el)
-	}
-
-	delete(k.index, orderID)
-}
-
-func (k *Kitchen) getStorageName(temp Temperature) string {
-	switch temp {
-	case TemperatureCold:
-		return css.Cooler
-	case TemperatureHot:
-		return css.Heater
-	case TemperatureRoom:
-		return css.Shelf
-	default:
-		return "unknown"
-	}
 }

@@ -2,6 +2,7 @@ package kitchen
 
 import (
 	"container/list"
+	"sync"
 	"time"
 )
 
@@ -14,170 +15,256 @@ const (
 )
 
 type KitchenOrder struct {
-	ID          string        `validate:"required"`
-	Name        string        `validate:"required"`
-	Temperature Temperature   `validate:"temp"`
-	Price       float64       `validate:"gt=0"`
-	Freshness   time.Duration `validate:"gt=0"`
+	ID          string
+	Name        string
+	Temperature Temperature
+	Price       int
+	Freshness   time.Duration
 	cookedAt    time.Time
 	lastUpdated time.Time
 }
 
-type storage struct {
-	store *list.List
-}
-
-func newStorage() *storage {
-	return &storage{
-		store: list.New(),
-	}
-}
-
-func (s *storage) add(order *KitchenOrder) *list.Element {
-	el := s.store.PushBack(order)
-	return el
-}
-
-func (s *storage) getFirstElement() *list.Element {
-	return s.store.Front()
-}
-
-func (s *storage) remove(el *list.Element) {
-	if el == nil || el.Value == nil {
-		return
-	}
-
-	order := el.Value.(*KitchenOrder)
-	s.store.Remove(el)
-
-	if order.lastUpdated.IsZero() {
-		order.lastUpdated = order.cookedAt
-	}
-	order.Freshness -= time.Since(order.lastUpdated)
-}
-
-func (s *storage) len() int {
-	return s.store.Len()
-}
-
-type shelfStorage struct {
-	shelf     *storage
-	coldShelf *storage
-	hotShelf  *storage
-	decay     int
-}
-
-func newShelfStorage(decay int) *shelfStorage {
-	return &shelfStorage{
-		shelf:     newStorage(),
-		coldShelf: newStorage(),
-		hotShelf:  newStorage(),
-		decay:     decay,
-	}
-}
-
-func (shs *shelfStorage) add(order *KitchenOrder) *list.Element {
-	if order == nil {
-		return nil
-	}
-
-	// Add order to the appropriate shelf based on the preferred storage requirement
-	// This makes finding a hot/cold order to move back to hot/cold storage O(1)
-	switch order.Temperature {
-	case TemperatureRoom:
-		return shs.shelf.add(order)
-	case TemperatureHot:
-		return shs.hotShelf.add(order)
-	case TemperatureCold:
-		return shs.coldShelf.add(order)
-	default:
-		return nil
-	}
-}
-
-func (shs *shelfStorage) remove(el *list.Element) {
-	if el == nil {
-		return
-	}
-
-	// Remove order from the appropriate shelf
-	order := el.Value.(*KitchenOrder)
-	switch order.Temperature {
-	case TemperatureRoom:
-		shs.shelf.remove(el)
-	case TemperatureHot:
-		shs.hotShelf.remove(el)
-	default:
-		shs.coldShelf.remove(el)
-	}
-
-	// Track time in shelf
-	order.lastUpdated = time.Now()
-	totalDecay := float64(shs.decay) * float64(order.lastUpdated.Sub(order.cookedAt))
-	order.Freshness -= time.Duration(totalDecay)
-}
-
-func (shs *shelfStorage) getFirstColdOrder() *list.Element {
-	// returns nil if no element exist
-	return shs.coldShelf.getFirstElement()
-}
-
-func (shs *shelfStorage) getFirstHotOrder() *list.Element {
-	// returns nil if no element exist
-	return shs.hotShelf.getFirstElement()
-}
-
-func (shs *shelfStorage) getOrderToDiscard() *list.Element {
-	elCold := shs.getFirstColdOrder()
-	elHot := shs.getFirstHotOrder()
-
-	switch {
-	case elCold != nil && elHot != nil:
-		return shs.getLeastFreshOrOldest(elCold, elHot)
-
-	case elHot != nil:
-		return elHot
-
-	case elCold != nil:
-		return elCold
-
-	default:
-		return shs.shelf.getFirstElement()
-	}
-}
-
-func (shs *shelfStorage) getLeastFreshOrOldest(el1, el2 *list.Element) *list.Element {
-	now := time.Now()
-	order1 := el1.Value.(*KitchenOrder)
-	order2 := el2.Value.(*KitchenOrder)
-
-	// Formula: Value = (Freshness - (DecayFactor * TimeInStorage))
-	val1 := shs.getOrderFreshness(order1, now)
-	val2 := shs.getOrderFreshness(order2, now)
-
-	switch {
-	case val1 < val2:
-		return el1
-	case val2 < val1:
-		return el2
-	// Tie-breaker: If calculated freshness is equal, discard the one cooked earlier
-	case order1.cookedAt.Before(order2.cookedAt):
-		return el1
-	default:
-		return el2
-	}
-}
-
-func (shs *shelfStorage) getOrderFreshness(order *KitchenOrder, refTime time.Time) time.Duration {
-	// Convert all components to float64 to maintain precision during decay multiplication
-	freshnessValue := float64(order.Freshness)
-	timeInStorage := float64(refTime.Sub(order.cookedAt))
-
-	// Formula: Remaining Freshness = Max Freshness - (Decay Factor * Time Passed)
-	remaining := freshnessValue - (timeInStorage * float64(shs.decay))
+func (k *KitchenOrder) getFreshness(refTime time.Time, decayFactor int) time.Duration {
+	freshnessValue := float64(k.Freshness)
+	timeInStorage := float64(refTime.Sub(k.cookedAt))
+	remaining := freshnessValue - (timeInStorage * float64(decayFactor))
 	return time.Duration(remaining)
 }
 
-func (shs *shelfStorage) len() int {
-	return shs.shelf.len() + shs.hotShelf.len() + shs.coldShelf.len()
+// -- General storage for Cooler and Heater --
+
+type Storage struct {
+	capacity int64
+	count    int64
+	items    map[string]*KitchenOrder
+	mu       sync.Mutex
+}
+
+func NewStorage(capacity int64) *Storage {
+	return &Storage{
+		capacity: capacity,
+		items:    make(map[string]*KitchenOrder, int(capacity)),
+	}
+}
+
+func (s *Storage) Add(order *KitchenOrder) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Ensure there is space
+	if s.count == s.capacity {
+		return false
+	}
+
+	order.cookedAt = time.Now()
+
+	// Assume every other is unique
+	s.items[order.ID] = order
+	s.count++
+	return true
+}
+
+func (s *Storage) Remove(orderid string) (*KitchenOrder, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	order, ok := s.items[orderid]
+	if !ok {
+		return order, ok
+	}
+
+	delete(s.items, orderid)
+	s.count--
+
+	// Update freshness
+	if order.lastUpdated.IsZero() {
+		order.lastUpdated = order.cookedAt
+	}
+	order.Freshness = order.getFreshness(time.Now(), 1)
+
+	return order, ok
+}
+
+func (s *Storage) HasSpace() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count < s.capacity
+}
+
+func (s *Storage) Len() int64 {
+	// This is function is intentionally left unsafe
+	return s.count
+}
+
+// -- Shelf storage --
+
+type ShelfStorage struct {
+	capacity  int64
+	count     int64
+	decay     int
+	items     map[string]*list.Element
+	coldItems *list.List
+	hotItems  *list.List
+	roomItems *list.List
+	mu        sync.Mutex
+}
+
+func NewShelfStorage(capacity int64, decay int) *ShelfStorage {
+	return &ShelfStorage{
+		capacity:  capacity,
+		coldItems: list.New(),
+		hotItems:  list.New(),
+		roomItems: list.New(),
+		decay:     decay,
+		items:     make(map[string]*list.Element, capacity),
+	}
+}
+
+func (s *ShelfStorage) Add(order *KitchenOrder) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// Ensure there is space
+	if s.count == s.capacity {
+		return false
+	}
+
+	var el *list.Element
+	order.cookedAt = time.Now()
+
+	// Assume order's temperature is any of cold, hot, room
+	switch order.Temperature {
+	case TemperatureCold:
+		el = s.coldItems.PushBack(order)
+	case TemperatureHot:
+		el = s.hotItems.PushBack(order)
+	default:
+		el = s.roomItems.PushBack(order)
+	}
+
+	s.items[order.ID] = el
+	s.count++
+	return true
+}
+
+func (s *ShelfStorage) Remove(orderid string) (*KitchenOrder, bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	el, ok := s.items[orderid]
+	if !ok {
+		return nil, false
+	}
+
+	order := el.Value.(*KitchenOrder)
+	switch order.Temperature {
+	case TemperatureCold:
+		s.coldItems.Remove(el)
+	case TemperatureHot:
+		s.hotItems.Remove(el)
+	default:
+		s.roomItems.Remove(el)
+	}
+
+	delete(s.items, orderid)
+
+	decay := s.decay
+	if order.Temperature == TemperatureRoom {
+		decay = 1
+	}
+
+	order.Freshness = order.getFreshness(time.Now(), decay)
+
+	s.count--
+	return order, true
+}
+
+func (s *ShelfStorage) GetOrderToDiscard() *KitchenOrder {
+	// 1. Get the oldest cold item and the oldest hot item
+	// 2. Compare both and return the oldest
+	// 3. If there is no cold or hot item, return the oldest shelf item
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.count == 0 {
+		return nil
+	}
+
+	// Get the oldest items from each category
+	coldEl := s.coldItems.Front()
+	hotEl := s.hotItems.Front()
+	roomEl := s.roomItems.Front()
+
+	// If there are no cold or hot items, return the oldest room item
+	if coldEl == nil && hotEl == nil {
+		if roomEl != nil {
+			return roomEl.Value.(*KitchenOrder)
+		}
+		return nil
+	}
+
+	// If only one type exists, return it
+	if coldEl == nil {
+		return hotEl.Value.(*KitchenOrder)
+	}
+	if hotEl == nil {
+		return coldEl.Value.(*KitchenOrder)
+	}
+
+	// Both cold and hot items exist; return the oldest
+	coldOrder := coldEl.Value.(*KitchenOrder)
+	hotOrder := hotEl.Value.(*KitchenOrder)
+
+	if hotOrder.cookedAt.Before(coldOrder.cookedAt) {
+		return hotOrder
+	}
+	return coldOrder
+}
+
+func (s *ShelfStorage) GetFirstColdOrder() *KitchenOrder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	el := s.coldItems.Front()
+	if el == nil {
+		return nil
+	}
+
+	return el.Value.(*KitchenOrder)
+}
+
+func (s *ShelfStorage) GetFirstHotOrder() *KitchenOrder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	el := s.hotItems.Front()
+	if el == nil {
+		return nil
+	}
+
+	return el.Value.(*KitchenOrder)
+}
+
+func (s *ShelfStorage) GetFirstRoomOrder() *KitchenOrder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	el := s.roomItems.Front()
+	if el == nil {
+		return nil
+	}
+
+	return el.Value.(*KitchenOrder)
+}
+
+func (s *ShelfStorage) HasSpace() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count < s.capacity
+}
+
+func (s *ShelfStorage) Len() int64 {
+	// This is function is intentionally left unsafe
+	return s.count
 }

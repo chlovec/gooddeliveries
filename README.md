@@ -14,12 +14,21 @@ Feel free to modify the `Dockerfile` as you see fit.
 
 If go `1.25` or later is locally installed, run the program directly for convenience:
 ```
-$ go run main.go --auth=agbo6gdrs1wd
+$ go run main.go --auth=<token>
+```
+
+To run the tests and see the code coverage report, use the command below.
+```
+$ make test/rpt
 ```
 
 ## Discard criteria
 
-When there is no available storage for a new placement request, the system looks for an item in the shelf to discard to make room for the new request. It looks for the first cooler-order and first-hot order on the shelf and picks one with the least freshness and discards that. If both have the same freshness, it discards the oldest. If there is no cold or hot item on the shelf, it chooses the oldest shelf item and discards it.
+When storage capacity is exhausted, the system performs a prioritized eviction from the overflow shelf. The selection process prioritizes Cold and Hot Temperature orders over Room Temperature orders. 
+1. The system identifies the oldest Cold and Hot orders currently on the shelf.
+2. If both exist, the older of the two is evicted; in the event of a tie, the Cold order is prioritized for eviction.
+3. If only one type is present, that order is evicted regardless of age.
+3. If no specialized orders are present, the system evicts the oldest Room Temperature order.
 
 In creating this solution, I made assumption of what a valid order should be:
 - ID is required

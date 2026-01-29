@@ -46,6 +46,7 @@ func TestKitchen_PlaceOrder_PickUpOrder(t *testing.T) {
 	invalidOrder := css.Order{
 		ID:        "room2",
 		Name:      "Room Sandwich",
+		Temp:      "bad",
 		Price:     7,
 		Freshness: 1200,
 	}
@@ -83,160 +84,170 @@ func TestKitchen_PlaceOrder_PickUpOrder(t *testing.T) {
 	}
 
 	decay := 2
-	// logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	f, _ := os.OpenFile("myorders_v1", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	f, _ := os.OpenFile("myorders_v3", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
 	logger := slog.New(slog.NewTextHandler(f, nil))
 
+	const one int64 = 1
+
 	t.Run("PlaceOrder/RoutesOrdersToPreferredStorage_WhenCapacityAvailable", func(t *testing.T) {
-		k := NewKitchen(1, 1, 1, decay, logger)
+		k := NewKitchen(one, one, one, decay, logger)
 
 		k.PlaceOrder(coldOrder)
 		k.PlaceOrder(hotOrder)
 		k.PlaceOrder(roomOrder)
 
-		require.Equal(t, 1, k.heater.len())
-		require.Equal(t, 1, k.cooler.len())
-		require.Equal(t, 1, k.shelf.len())
+		err := k.PlaceOrder(invalidOrder)
+		vErrs, ok := err.(ValidationErrors)
+		require.True(t, ok, "Error should be of type ValidationErrors")
+		require.Len(t, vErrs, 1)
+		require.Equal(t, "1 validation errors occurred", err.Error())
+		require.Equal(t, "must be one of hot, cold, or room", vErrs[0].Message)
+		require.Equal(t, "Temp", vErrs[0].Field)
+
+		require.Equal(t, one, k.heater.Len())
+		require.Equal(t, one, k.cooler.Len())
+		require.Equal(t, one, k.shelf.Len())
 
 		// Verify cold order was stored
-		pickColdOrder, ok := k.PickUpOrder(coldOrder.ID)
-		require.True(t, ok)
+		pickColdOrder, err := k.PickUpOrder(coldOrder.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, coldOrder, pickColdOrder)
-		require.Zero(t, k.cooler.len())
+		require.Zero(t, k.cooler.Len())
 
 		// Verify hot order was stored
-		pickupHotOrder, ok := k.PickUpOrder(hotOrder.ID)
-		require.True(t, ok)
+		pickupHotOrder, err := k.PickUpOrder(hotOrder.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, hotOrder, pickupHotOrder)
-		require.Zero(t, k.heater.len())
+		require.Zero(t, k.heater.Len())
 
 		// Verify room order was stored
-		pickupRoomOrder, ok := k.PickUpOrder(roomOrder.ID)
-		require.True(t, ok)
+		pickupRoomOrder, err := k.PickUpOrder(roomOrder.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, roomOrder, pickupRoomOrder)
-		require.Zero(t, k.shelf.len())
+		require.Zero(t, k.shelf.Len())
 
 		// Verify invalidOrder was not stored
-		pickupInvalidOrder, ok := k.PickUpOrder(invalidOrder.ID)
-		require.False(t, ok)
+		pickupInvalidOrder, err := k.PickUpOrder(invalidOrder.ID)
+		require.Error(t, err)
 		require.Zero(t, pickupInvalidOrder)
+		require.Equal(t, "order not found", err.Error())
 	})
 
 	t.Run(
 		"PlaceOrder/Shelf_DiscardPolicy_DiscardsShelfOrder_WhenAllStoragesAreFull",
 		func(t *testing.T) {
-			k := NewKitchen(1, 1, 1, decay, logger)
+			k := NewKitchen(one, one, one, decay, logger)
 
 			k.PlaceOrder(coldOrder)
 			k.PlaceOrder(hotOrder)
 			k.PlaceOrder(roomOrder)
 			k.PlaceOrder(coldOrder4)
 
-			require.Equal(t, 1, k.heater.len())
-			require.Equal(t, 1, k.cooler.len())
-			require.Equal(t, 1, k.shelf.len())
+			require.Equal(t, one, k.heater.Len())
+			require.Equal(t, one, k.cooler.Len())
+			require.Equal(t, one, k.shelf.Len())
 
-			pickColdOrder, ok := k.PickUpOrder(coldOrder.ID)
-			require.True(t, ok)
+			pickColdOrder, err := k.PickUpOrder(coldOrder.ID)
+			require.Nil(t, err)
 			assertOrderMatch(t, coldOrder, pickColdOrder)
 
-			pickupHotOrder, ok := k.PickUpOrder(hotOrder.ID)
-			require.True(t, ok)
+			pickupHotOrder, err := k.PickUpOrder(hotOrder.ID)
+			require.Nil(t, err)
 			assertOrderMatch(t, hotOrder, pickupHotOrder)
 
-			pickupRoomOrder, ok := k.PickUpOrder(roomOrder.ID)
-			require.False(t, ok)
+			pickupRoomOrder, err := k.PickUpOrder(roomOrder.ID)
+			require.Error(t, err)
 			require.Zero(t, pickupRoomOrder)
 
-			pickupColdOrder4, ok := k.PickUpOrder(coldOrder4.ID)
-			require.True(t, ok)
+			pickupColdOrder4, err := k.PickUpOrder(coldOrder4.ID)
+			require.Nil(t, err)
 			assertOrderMatch(t, coldOrder4, pickupColdOrder4)
 		})
 
 	t.Run("PlaceOrder/MovesHotOrderFromShelfToHeater_WhenHeaterHasCapacity", func(t *testing.T) {
-		k := NewKitchen(1, 1, 2, decay, logger)
+		k := NewKitchen(one, one, 2, decay, logger)
 
 		k.PlaceOrder(hotOrder)
 		k.PlaceOrder(roomOrder)
 		k.PlaceOrder(hotOrder2)
 		k.PlaceOrder(coldOrder)
 
-		pickupHotOrder, ok := k.PickUpOrder(hotOrder.ID)
-		require.True(t, ok)
+		pickupHotOrder, err := k.PickUpOrder(hotOrder.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, hotOrder, pickupHotOrder)
 
 		k.PlaceOrder(coldOrder2)
 
-		pickupHotOrder2, ok := k.PickUpOrder(hotOrder2.ID)
-		require.True(t, ok)
+		pickupHotOrder2, err := k.PickUpOrder(hotOrder2.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, hotOrder2, pickupHotOrder2)
 	})
 
 	t.Run("PlaceOrder/MovesColdOrderFromShelfToCooler_WhenCoolerHasCapacity", func(t *testing.T) {
-		k := NewKitchen(1, 1, 2, decay, logger)
+		k := NewKitchen(one, one, 2, decay, logger)
 
 		k.PlaceOrder(hotOrder)
 		k.PlaceOrder(roomOrder)
 		k.PlaceOrder(coldOrder)
 		k.PlaceOrder(coldOrder4)
 
-		pickColdOrder, ok := k.PickUpOrder(coldOrder.ID)
-		require.True(t, ok)
+		pickColdOrder, err := k.PickUpOrder(coldOrder.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, coldOrder, pickColdOrder)
 
 		k.PlaceOrder(hotOrder2)
 
-		pickupColdOrder4, ok := k.PickUpOrder(coldOrder4.ID)
-		require.True(t, ok)
+		pickupColdOrder4, err := k.PickUpOrder(coldOrder4.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, coldOrder4, pickupColdOrder4)
 
-		pickupHotOrder2, ok := k.PickUpOrder(hotOrder2.ID)
-		require.True(t, ok)
+		pickupHotOrder2, err := k.PickUpOrder(hotOrder2.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, hotOrder2, pickupHotOrder2)
 	})
 
 	t.Run("PlaceOrder/Shelf_DiscardPolicy_DiscardsRoomOrder_ToPlaceColdOrder", func(t *testing.T) {
-		k := NewKitchen(1, 1, 1, decay, logger)
+		k := NewKitchen(one, one, one, decay, logger)
 
 		k.PlaceOrder(roomOrder)
 		k.PlaceOrder(coldOrder)
 		k.PlaceOrder(coldOrder4)
 
-		pickupRoomOrder, ok := k.PickUpOrder(roomOrder.ID)
-		require.False(t, ok)
+		pickupRoomOrder, err := k.PickUpOrder(roomOrder.ID)
+		require.Error(t, err)
 		require.Zero(t, pickupRoomOrder)
 
-		pickColdOrder, ok := k.PickUpOrder(coldOrder.ID)
-		require.True(t, ok)
+		pickColdOrder, err := k.PickUpOrder(coldOrder.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, coldOrder, pickColdOrder)
 
-		pickupColdOrder4, ok := k.PickUpOrder(coldOrder4.ID)
-		require.True(t, ok)
+		pickupColdOrder4, err := k.PickUpOrder(coldOrder4.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, coldOrder4, pickupColdOrder4)
 	})
 
 	t.Run("PlaceOrder/Shelf_DiscardPolicy_DiscardsRoomOrder_ToPlaceHotOrder", func(t *testing.T) {
-		k := NewKitchen(1, 1, 1, decay, logger)
+		k := NewKitchen(one, one, one, decay, logger)
 
 		k.PlaceOrder(roomOrder)
 		k.PlaceOrder(hotOrder)
 		k.PlaceOrder(hotOrder2)
 
-		pickupRoomOrder, ok := k.PickUpOrder(roomOrder.ID)
-		require.False(t, ok)
+		pickupRoomOrder, err := k.PickUpOrder(roomOrder.ID)
+		require.Error(t, err)
 		require.Zero(t, pickupRoomOrder)
 
-		pickHotOrder, ok := k.PickUpOrder(hotOrder.ID)
-		require.True(t, ok)
+		pickHotOrder, err := k.PickUpOrder(hotOrder.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, hotOrder, pickHotOrder)
 
-		pickHotOrder2, ok := k.PickUpOrder(hotOrder2.ID)
-		require.True(t, ok)
+		pickHotOrder2, err := k.PickUpOrder(hotOrder2.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, hotOrder2, pickHotOrder2)
 	})
 
 	t.Run("PlaceOrder/DoesNotMoveColdOrderFromShelf_WhenCoolerIsFull", func(t *testing.T) {
-		k := NewKitchen(1, 1, 2, decay, logger)
+		k := NewKitchen(one, one, 2, decay, logger)
 
 		k.PlaceOrder(hotOrder)
 		k.PlaceOrder(roomOrder)
@@ -244,70 +255,70 @@ func TestKitchen_PlaceOrder_PickUpOrder(t *testing.T) {
 		k.PlaceOrder(coldOrder4)
 		k.PlaceOrder(hotOrder2)
 
-		pickupColdOrder4, ok := k.PickUpOrder(coldOrder4.ID)
-		require.False(t, ok)
+		pickupColdOrder4, err := k.PickUpOrder(coldOrder4.ID)
+		require.Error(t, err)
 		require.Zero(t, pickupColdOrder4)
 
-		pickUpHotOrder2, ok := k.PickUpOrder(hotOrder2.ID)
-		require.True(t, ok)
+		pickUpHotOrder2, err := k.PickUpOrder(hotOrder2.ID)
+		require.Nil(t, err)
 		assertOrderMatch(t, hotOrder2, pickUpHotOrder2)
 	})
 
 	t.Run("PickUpOrder/Fails_WhenOrderExpiredInPreferredStorage", func(t *testing.T) {
-		k := NewKitchen(1, 1, 1, decay, logger)
+		k := NewKitchen(one, one, one, decay, logger)
 		k.PlaceOrder(coldOrder2)
-		require.Equal(t, 1, k.cooler.len())
+		require.Equal(t, one, k.cooler.Len())
 
 		time.Sleep(1 * time.Second)
-		order, ok := k.PickUpOrder(coldOrder2.ID)
+		order, err := k.PickUpOrder(coldOrder2.ID)
 
-		require.False(t, ok)
+		require.Error(t, err)
 		require.Zero(t, order)
-		require.Equal(t, 0, k.cooler.len())
+		require.Zero(t, k.cooler.Len())
 	})
 
 	t.Run("PickUpOrder/Fails_WhenOrderExpiredInSecondaryStorage", func(t *testing.T) {
-		k := NewKitchen(1, 1, 1, decay, logger)
+		k := NewKitchen(one, one, one, decay, logger)
 		k.PlaceOrder(coldOrder2)
-		require.Equal(t, 1, k.cooler.len())
+		require.Equal(t, one, k.cooler.Len())
 
 		time.Sleep(1 * time.Second)
-		order, ok := k.PickUpOrder(coldOrder2.ID)
+		order, err := k.PickUpOrder(coldOrder2.ID)
 
-		require.False(t, ok)
+		require.Error(t, err)
 		require.Zero(t, order)
-		require.Equal(t, 0, k.cooler.len())
+		require.Zero(t, k.cooler.Len())
 	})
 
 	t.Run("PickUpOrder/Fails_WhenColdOrderExpiresOnShelf", func(t *testing.T) {
-		k := NewKitchen(1, 1, 1, decay, logger)
+		k := NewKitchen(one, one, one, decay, logger)
 		k.PlaceOrder(coldOrder2)
 		k.PlaceOrder(coldOrder3)
 
-		require.Equal(t, 1, k.cooler.len())
-		require.Equal(t, 1, k.shelf.len())
+		require.Equal(t, one, k.cooler.Len())
+		require.Equal(t, one, k.shelf.Len())
 
 		time.Sleep(2 * time.Second)
-		order, ok := k.PickUpOrder(coldOrder3.ID)
+		order, err := k.PickUpOrder(coldOrder3.ID)
 
-		require.Equal(t, 1, k.cooler.len())
-		require.Zero(t, k.shelf.len())
+		require.Equal(t, one, k.cooler.Len())
+		require.Zero(t, k.shelf.Len())
 
-		require.False(t, ok)
+		require.Error(t, err)
 		require.Zero(t, order)
 	})
 
 	t.Run("PlaceOrder/ReturnsValidationError_WhenOrderIsInvalid", func(t *testing.T) {
-		k := NewKitchen(1, 1, 1, decay, logger)
+		k := NewKitchen(one, one, one, decay, logger)
 		invalidOrder := css.Order{}
 
 		err := k.PlaceOrder(invalidOrder)
 
 		require.Error(t, err)
 
-		require.Zero(t, k.heater.len())
-		require.Zero(t, k.cooler.len())
-		require.Zero(t, k.shelf.len())
+		require.Zero(t, k.heater.Len())
+		require.Zero(t, k.cooler.Len())
+		require.Zero(t, k.shelf.Len())
 
 		vErrs, ok := err.(ValidationErrors)
 		require.True(t, ok, "Error should be of type ValidationErrors")

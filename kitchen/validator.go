@@ -1,4 +1,4 @@
-package kitchenv3
+package kitchen
 
 import (
 	"challenge/client"
