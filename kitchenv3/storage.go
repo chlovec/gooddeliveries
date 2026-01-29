@@ -242,7 +242,7 @@ func (s *ShelfStorage) GetFirstHotOrder() *KitchenOrder {
 func (s *ShelfStorage) GetFirstRoomOrder() *KitchenOrder {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	
+
 	el := s.roomItems.Front()
 	if el == nil {
 		return nil

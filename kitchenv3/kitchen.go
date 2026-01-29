@@ -61,7 +61,7 @@ func (k *Kitchen) PlaceOrder(newOrder client.Order) error {
 		storageName = client.Shelf
 	}
 
-	if !placed  {
+	if !placed {
 		placed = k.placeInShelf(order)
 		storageName = client.Shelf
 	}
@@ -159,7 +159,7 @@ func (k *Kitchen) moveShelfHotOrder() bool {
 	}
 
 	order := k.shelf.GetFirstHotOrder()
-	if order == nil || !k.heater.Add(order){
+	if order == nil || !k.heater.Add(order) {
 		return false
 	}
 
