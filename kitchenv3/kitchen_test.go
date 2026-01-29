@@ -84,7 +84,8 @@ func TestKitchen_PlaceOrder_PickUpOrder(t *testing.T) {
 	}
 
 	decay := 2
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
+	f, _ := os.OpenFile("myorders_v3", os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	logger := slog.New(slog.NewTextHandler(f, nil))
 
 	const one int64 = 1
 

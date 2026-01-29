@@ -30,3 +30,8 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+kitchen_service_log_v1
+kitchen_service_log_v3
+kitchen/myorders_v1
+kitchenv3/myorders_v3

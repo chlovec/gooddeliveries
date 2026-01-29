@@ -3,7 +3,6 @@ package kitchenv3
 import (
 	"container/list"
 	"sync"
-	"sync/atomic"
 	"time"
 )
 
@@ -87,10 +86,13 @@ func (s *Storage) Remove(orderid string) (*KitchenOrder, bool) {
 }
 
 func (s *Storage) HasSpace() bool {
-	return atomic.LoadInt64(&s.count) < int64(s.capacity)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count < s.capacity
 }
 
 func (s *Storage) Len() int64 {
+	// This is function is intentionally left unsafe
 	return s.count
 }
 
@@ -214,6 +216,9 @@ func (s *ShelfStorage) GetOrderToDiscard() *KitchenOrder {
 }
 
 func (s *ShelfStorage) GetFirstColdOrder() *KitchenOrder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	el := s.coldItems.Front()
 	if el == nil {
 		return nil
@@ -223,6 +228,9 @@ func (s *ShelfStorage) GetFirstColdOrder() *KitchenOrder {
 }
 
 func (s *ShelfStorage) GetFirstHotOrder() *KitchenOrder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
 	el := s.hotItems.Front()
 	if el == nil {
 		return nil
@@ -232,6 +240,9 @@ func (s *ShelfStorage) GetFirstHotOrder() *KitchenOrder {
 }
 
 func (s *ShelfStorage) GetFirstRoomOrder() *KitchenOrder {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	
 	el := s.roomItems.Front()
 	if el == nil {
 		return nil
@@ -241,9 +252,12 @@ func (s *ShelfStorage) GetFirstRoomOrder() *KitchenOrder {
 }
 
 func (s *ShelfStorage) HasSpace() bool {
-	return atomic.LoadInt64(&s.count) < int64(s.capacity)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.count < s.capacity
 }
 
 func (s *ShelfStorage) Len() int64 {
+	// This is function is intentionally left unsafe
 	return s.count
 }

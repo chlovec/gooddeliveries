@@ -48,19 +48,30 @@ func (k *Kitchen) PlaceOrder(newOrder client.Order) error {
 	}
 
 	var placed bool
+	var storageName string
 	switch order.Temperature {
 	case TemperatureHot:
 		placed = k.heater.Add(order)
+		storageName = client.Heater
 	case TemperatureCold:
 		placed = k.cooler.Add(order)
+		storageName = client.Cooler
 	default:
 		placed = k.shelf.Add(order)
+		storageName = client.Shelf
 	}
 
-	if !placed {
+	if !placed  {
 		placed = k.placeInShelf(order)
+		storageName = client.Shelf
 	}
 
+	// Log pickup and return results
+	if !placed {
+		return errors.New("unable to place order")
+	}
+
+	k.logger.Info(client.Place, "order id", order.ID, "target", storageName)
 	return nil
 }
 
@@ -68,17 +79,27 @@ func (k *Kitchen) PickUpOrder(orderID string) (client.Order, error) {
 	var foundOrder *KitchenOrder
 
 	// Try to find and remove the order from  any of the three storages
+	var storageName string
+
 	if order, ok := k.heater.Remove(orderID); ok {
 		foundOrder = order
+		storageName = client.Heater
 	} else if order, ok := k.cooler.Remove(orderID); ok {
 		foundOrder = order
+		storageName = client.Cooler
 	} else if order, ok := k.shelf.Remove(orderID); ok {
+		storageName = client.Shelf
 		foundOrder = order
 	}
 
 	if foundOrder == nil {
 		return client.Order{}, errors.New("order not found")
-	} else if foundOrder.Freshness <= 0 {
+	}
+
+	k.logger.Info(client.Pickup, "order id", foundOrder.ID, "target", storageName)
+
+	if foundOrder.Freshness <= 0 {
+		// Should this also be logged as discarded?
 		return client.Order{}, fmt.Errorf("order has expired: %+v", foundOrder.Freshness)
 	}
 
@@ -108,6 +129,7 @@ func (k *Kitchen) placeInShelf(order *KitchenOrder) bool {
 	} else {
 		toDiscard := k.shelf.GetOrderToDiscard()
 		k.shelf.Remove(toDiscard.ID)
+		k.logger.Info(client.Discard, "order id", toDiscard.ID, "target", client.Shelf)
 	}
 
 	return k.shelf.Add(order)
@@ -119,14 +141,16 @@ func (k *Kitchen) moveShelfColdOrder() bool {
 	}
 
 	order := k.shelf.GetFirstColdOrder()
-	if order == nil {
+	if order == nil || !k.cooler.Add(order) {
 		return false
 	}
 
 	if _, ok := k.shelf.Remove(order.ID); !ok {
 		return false
 	}
-	return k.cooler.Add(order)
+
+	k.logger.Info(client.Move, "order id", order.ID, "target", client.Cooler)
+	return true
 }
 
 func (k *Kitchen) moveShelfHotOrder() bool {
@@ -135,12 +159,14 @@ func (k *Kitchen) moveShelfHotOrder() bool {
 	}
 
 	order := k.shelf.GetFirstHotOrder()
-	if order == nil {
+	if order == nil || !k.heater.Add(order){
 		return false
 	}
 
 	if _, ok := k.shelf.Remove(order.ID); !ok {
 		return false
 	}
-	return k.heater.Add(order)
+
+	k.logger.Info(client.Move, "order id", order.ID, "target", client.Heater)
+	return false
 }
